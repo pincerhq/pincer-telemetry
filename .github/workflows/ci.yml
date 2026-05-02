@@ -7,7 +7,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v4
-      - run: uv sync
+      - run: uv sync --all-extras
 
       - name: Run tests with coverage
         run: uv run pytest --cov=pincer-telemetry --cov-report=xml
