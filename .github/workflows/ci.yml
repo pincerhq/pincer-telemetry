@@ -10,7 +10,7 @@ jobs:
       - run: uv sync --all-extras
 
       - name: Run tests with coverage
-        run: uv run pytest --cov=pincer-telemetry --cov-report=xml
+        run: uv run pytest --cov=pincer_telemetry --cov-report=xml
 
       - name: Type check
         run: uv run mypy src/
@@ -22,7 +22,7 @@ jobs:
         run: uv run ruff format --check .
 
       - name: Security scan
-        run: uv run bandit -r src/pincer-telemetry -ll -s B101,B104,B310,B608
+        run: uv run bandit -r src/pincer_telemetry -ll -s B101,B104,B310,B608
 
       - name: Upload coverage reports to Codecov
         uses: codecov/codecov-action@v5
