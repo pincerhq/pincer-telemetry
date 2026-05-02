@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from unittest.mock import MagicMock, patch
 
 import pytest
+
 from pincer_telemetry._core import _parse_dsn
 
 if TYPE_CHECKING:
