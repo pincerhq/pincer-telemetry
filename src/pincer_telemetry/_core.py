@@ -5,7 +5,7 @@ from __future__ import annotations
 import atexit
 import logging
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 _log = logging.getLogger(__name__)
 
 
-def _parse_dsn(dsn_url: str) -> tuple[str, str, bool]:
+def _parse_dsn(dsn_url: str) -> tuple[str, str | None, bool]:
     """
     Decompose a DSN URL into the parts needed to configure OTLP exporters.
 
@@ -28,11 +28,13 @@ def _parse_dsn(dsn_url: str) -> tuple[str, str, bool]:
     Returns
     -------
     http_base:
-        Clean ``scheme://host`` string (credentials stripped, standard ports
-        omitted) used as the prefix for HTTP signal endpoints.
+        ``scheme://host:port`` string (credentials stripped) used as the
+        prefix for HTTP signal endpoints.  Port defaults to ``80`` for
+        ``http`` and ``443`` for ``https`` when not specified in the URL.
     grpc_endpoint:
-        ``host:port`` string for the gRPC channel; port defaults to ``4317``
-        (the OTLP/gRPC standard) when not explicitly set in the URL.
+        ``host:port`` string for the gRPC channel, sourced from the ``grpc``
+        query parameter (e.g. ``?grpc=4317``).  ``None`` when the parameter is
+        absent or empty — callers should fall back to HTTP in that case.
     insecure:
         ``True`` when the scheme is ``http`` — uses a plain-text gRPC channel
         instead of TLS.
@@ -42,14 +44,14 @@ def _parse_dsn(dsn_url: str) -> tuple[str, str, bool]:
     scheme = parsed.scheme or "https"
     insecure = scheme == "http"
 
-    # HTTP base: credentials stripped, default ports omitted
-    if parsed.port and parsed.port not in (80, 443):
-        http_base = f"{scheme}://{host}:{parsed.port}"
-    else:
-        http_base = f"{scheme}://{host}"
+    # HTTP base: credentials stripped, port always explicit.
+    port = parsed.port or (80 if insecure else 443)
+    http_base = f"{scheme}://{host}:{port}"
 
-    # gRPC endpoint: bare host:port (no scheme — gRPC uses its own framing)
-    grpc_endpoint = f"{host}:{parsed.port or 4317}"
+    # gRPC endpoint: derived from the `grpc` query param; None when absent/empty.
+    grpc_port_values = parse_qs(parsed.query).get("grpc", [])
+    grpc_port = grpc_port_values[0].strip() if grpc_port_values else ""
+    grpc_endpoint: str | None = f"{host}:{grpc_port}" if grpc_port else None
 
     return http_base, grpc_endpoint, insecure
 
@@ -173,13 +175,18 @@ def init(
     headers: dict[str, str] = {"uptrace-dsn": dsn_url}
     http_base, grpc_endpoint, insecure = _parse_dsn(dsn_url)
 
-    # gRPC preferred; HTTP fallback when the gRPC package is not installed.
+    # gRPC preferred when a grpc query param is present; HTTP fallback otherwise
+    # or when the gRPC package is not installed.
     transport = "gRPC"
-    try:
-        span_exp, metric_exp, log_exp = _make_grpc_exporters(grpc_endpoint, headers, insecure)
-    except ImportError:
+    if grpc_endpoint is None:
         span_exp, metric_exp, log_exp = _make_http_exporters(http_base, headers)
         transport = "HTTP"
+    else:
+        try:
+            span_exp, metric_exp, log_exp = _make_grpc_exporters(grpc_endpoint, headers, insecure)
+        except ImportError:
+            span_exp, metric_exp, log_exp = _make_http_exporters(http_base, headers)
+            transport = "HTTP"
 
     _log.debug("OTel transport: %s", transport)
 
