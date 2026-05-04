@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import atexit
 import logging
+import os
 from typing import TYPE_CHECKING, Any
 from urllib.parse import parse_qs, urlparse
 
@@ -97,7 +98,7 @@ def _make_http_exporters(http_base: str, headers: dict[str, str]) -> tuple[Any, 
 def init(
     project_name: str,
     version: str,
-    dsn_url: str,
+    dsn_url: str | None = os.getenv("OTEL_DSN"),
 ) -> Callable[[], None]:
     """
     Initialise OpenTelemetry traces, metrics, and logs.
@@ -130,9 +131,14 @@ def init(
 
     Raises
     ------
+    ValueError
+        When ``dsn_url`` is ``None`` (not passed and ``OTEL_DSN`` env var unset).
     ImportError
         When ``pincer-telemetry`` is not installed.
     """
+    if dsn_url is None:
+        raise ValueError("dsn_url is required. Pass it explicitly or set the OTEL_DSN environment variable.")
+
     try:
         from opentelemetry import metrics, trace
         from opentelemetry._logs import set_logger_provider

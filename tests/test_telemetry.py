@@ -460,6 +460,41 @@ def test_init_returns_callable() -> None:
 
 
 # ---------------------------------------------------------------------------
+# dsn_url validation
+# ---------------------------------------------------------------------------
+
+
+def test_init_raises_when_dsn_url_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """init() raises ValueError immediately when dsn_url is None."""
+    monkeypatch.delenv("OTEL_DSN", raising=False)
+    from pincer_telemetry import init
+
+    with pytest.raises(ValueError, match="OTEL_DSN"):
+        init("svc", "1.0", None)
+
+
+def test_init_uses_otel_dsn_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
+    """init() reads dsn_url from OTEL_DSN when not passed explicitly."""
+    monkeypatch.setenv("OTEL_DSN", _HTTP_DSN)
+
+    # Re-import so the default argument is re-evaluated with the env var set.
+    import importlib
+
+    import pincer_telemetry._core as core_mod
+
+    importlib.reload(core_mod)
+
+    with (
+        patch(_HTTP_EXPORTERS, return_value=_mock_exporters()),
+        patch(_SET_TRACER),
+        patch(_SET_METER),
+        patch(_SET_LOGGER),
+        patch(_LOGGING_INSTRUMENTOR),
+    ):
+        core_mod.init("svc", "1.0")
+
+
+# ---------------------------------------------------------------------------
 # ImportError guard
 # ---------------------------------------------------------------------------
 
