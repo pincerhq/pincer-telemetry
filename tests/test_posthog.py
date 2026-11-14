@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from opentelemetry.exporter.otlp.proto.http import Compression
 
-from pincer_telemetry import DEFAULT_COLLECTORS, Collector, PostHogProvider
+from pincer_telemetry import DEFAULT_COLLECTORS, Collector, PostHogProvider, TelemetryConfigError
 from pincer_telemetry.providers.posthog import _PostHogExceptionHandler
 
 if TYPE_CHECKING:
@@ -212,3 +212,47 @@ def test_handler_swallows_client_errors(capsys: pytest.CaptureFixture[str]) -> N
     record = logging.LogRecord("app", logging.ERROR, __file__, 1, "msg", None, (ValueError, ValueError("v"), None))
     handler.emit(record)  # must not raise
     client.capture_exception.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# from_dsn
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("dsn", "host"),
+    [
+        ("https://phc_key@us.i.posthog.com", "https://us.i.posthog.com"),
+        ("https://phc_key@eu.i.posthog.com/", "https://eu.i.posthog.com"),
+        ("http://phc_key@127.0.0.1:8000", "http://127.0.0.1:8000"),
+        ("http://phc_key@[::1]:8000", "http://[::1]:8000"),
+    ],
+)
+def test_from_dsn(dsn: str, host: str) -> None:
+    p = PostHogProvider.from_dsn(dsn)
+    assert p.api_key == "phc_key"
+    assert p.host == host
+
+
+def test_from_dsn_passes_kwargs() -> None:
+    p = PostHogProvider.from_dsn("https://phc_key@us.i.posthog.com", capture_exceptions=False)
+    assert p.capture_exceptions is False
+
+
+@pytest.mark.parametrize(
+    ("dsn", "match"),
+    [
+        ("https://us.i.posthog.com", "API key"),
+        ("us.i.posthog.com", "scheme"),
+        ("ftp://phc_key@us.i.posthog.com", "scheme"),
+        ("https://phc_key@", "host"),
+        ("https://phc_key:pw@us.i.posthog.com", "password"),
+        ("https://phc_key@us.i.posthog.com/i/v1", "path"),
+        ("https://phc_key@us.i.posthog.com?x=1", "query"),
+        ("https://phc_key@us.i.posthog.com:notaport", "valid URL"),
+    ],
+)
+def test_from_dsn_malformed(dsn: str, match: str) -> None:
+    with pytest.raises(TelemetryConfigError, match=match) as exc:
+        PostHogProvider.from_dsn(dsn)
+    assert "phc_key" not in str(exc.value)

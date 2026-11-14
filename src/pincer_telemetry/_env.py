@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import os
 from typing import TYPE_CHECKING
+from urllib.parse import urlsplit
 
+from pincer_telemetry._errors import TelemetryConfigError
 from pincer_telemetry.providers.posthog import DEFAULT_HOST, PostHogProvider
 from pincer_telemetry.providers.uptrace import UptraceProvider
 
@@ -47,3 +49,68 @@ def provider_from_env(env: Mapping[str, str] | None = None) -> Provider | None:
     if api_key:
         return PostHogProvider(api_key, host=host)
     return None
+
+
+_PREFIXED_PROVIDERS = ("UPTRACE", "POSTHOG")
+
+
+def _uptrace_from_dsn(key: str, dsn: str) -> UptraceProvider:
+    try:
+        parts = urlsplit(dsn)
+        _ = parts.port
+    except ValueError:
+        raise TelemetryConfigError(f"{key} is not a valid URL") from None
+    if parts.scheme not in ("http", "https"):
+        raise TelemetryConfigError(f"{key} must use the http or https scheme")
+    if not parts.hostname:
+        raise TelemetryConfigError(f"{key} has no host")
+    if not parts.username:
+        raise TelemetryConfigError(f"{key} has no token; expected scheme://<token>@host")
+    return UptraceProvider(dsn)
+
+
+def provider_from_prefixed_env(prefix: str = "TELEMETRY_", env: Mapping[str, str] | None = None) -> Provider | None:
+    """
+    Build a provider from ``<prefix><PROVIDER>_DSN`` variables, strictly.
+
+    Only keys starting with ``prefix`` are considered; empty values count as unset
+    (docker-compose ``${VAR}`` yields empty strings). Recognised keys:
+
+    - ``<prefix>UPTRACE_DSN`` — ``https://<token>@api.uptrace.dev?grpc=4317``
+    - ``<prefix>POSTHOG_DSN`` — ``https://<phc_api_key>@us.i.posthog.com`` (or ``eu.i.posthog.com``)
+
+    Returns ``None`` when no key is set.
+
+    Raises
+    ------
+    TelemetryConfigError
+        On any other non-empty ``<prefix>*`` key, when both providers are configured,
+        or when the DSN is malformed. Messages name keys, never values.
+    """
+    env = os.environ if env is None else env
+    dsns: dict[str, tuple[str, str]] = {}
+    for key in sorted(env):
+        if not key.startswith(prefix):
+            continue
+        value = env[key].strip()
+        if not value:
+            continue
+        rest = key[len(prefix) :]
+        provider, sep, suffix = rest.rpartition("_")
+        if not sep or suffix != "DSN" or provider not in _PREFIXED_PROVIDERS:
+            expected = " or ".join(f"{prefix}{p}_DSN" for p in _PREFIXED_PROVIDERS)
+            raise TelemetryConfigError(f"unknown telemetry setting {key}; expected {expected}")
+        dsns[provider] = (key, value)
+
+    if len(dsns) > 1:
+        keys = " and ".join(key for key, _ in dsns.values())
+        raise TelemetryConfigError(f"{keys} are both set; configure only one telemetry provider")
+    if not dsns:
+        return None
+    ((provider, (key, dsn)),) = dsns.items()
+    if provider == "UPTRACE":
+        return _uptrace_from_dsn(key, dsn)
+    try:
+        return PostHogProvider.from_dsn(dsn)
+    except TelemetryConfigError as exc:
+        raise TelemetryConfigError(f"{key}: {exc}") from None

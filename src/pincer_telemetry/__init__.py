@@ -21,7 +21,8 @@ vendor-specific features.
 """
 
 from pincer_telemetry._api import AsyncTelemetry, Telemetry, get_provider, init, init_async
-from pincer_telemetry._env import provider_from_env
+from pincer_telemetry._env import provider_from_env, provider_from_prefixed_env
+from pincer_telemetry._errors import TelemetryConfigError
 from pincer_telemetry._types import DEFAULT_COLLECTORS, Collector, OtelTuning, SignalExporters
 from pincer_telemetry.providers import PostHogProvider, Provider, UptraceProvider
 
@@ -34,9 +35,11 @@ __all__ = [
     "Provider",
     "SignalExporters",
     "Telemetry",
+    "TelemetryConfigError",
     "UptraceProvider",
     "get_provider",
     "init",
     "init_async",
     "provider_from_env",
+    "provider_from_prefixed_env",
 ]

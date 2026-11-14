@@ -14,10 +14,12 @@ from pincer_telemetry import (
     Collector,
     PostHogProvider,
     Telemetry,
+    TelemetryConfigError,
     UptraceProvider,
     get_provider,
     init,
     provider_from_env,
+    provider_from_prefixed_env,
 )
 
 
@@ -330,3 +332,85 @@ def test_provider_tuning_applied() -> None:
     assert bsp.call_args.kwargs == {"max_queue_size": 10, "max_export_batch_size": 5}
     assert blp.call_args.kwargs == {"max_queue_size": 10, "max_export_batch_size": 5}
     assert reader.call_args.kwargs == {"export_interval_millis": 1234}
+
+
+# ---------------------------------------------------------------------------
+# provider_from_prefixed_env()
+# ---------------------------------------------------------------------------
+
+_UPTRACE = "https://tok@api.uptrace.dev?grpc=4317"
+_POSTHOG = "https://phc_secret@eu.i.posthog.com"
+
+
+def test_prefixed_nothing_configured() -> None:
+    assert provider_from_prefixed_env("TELEMETRY_", {}) is None
+
+
+def test_prefixed_ignores_other_prefixes() -> None:
+    env = {"OTEL_DSN": _UPTRACE, "PINCER_TELEMETRY_DSN": _UPTRACE, "MY_TELEMETRY_X": "1"}
+    assert provider_from_prefixed_env("TELEMETRY_", env) is None
+
+
+def test_prefixed_empty_values_are_unset() -> None:
+    env = {"TELEMETRY_UPTRACE_DSN": "", "TELEMETRY_POSTHOG_DSN": "  ", "TELEMETRY_PROVIDER": ""}
+    assert provider_from_prefixed_env("TELEMETRY_", env) is None
+
+
+def test_prefixed_uptrace() -> None:
+    p = provider_from_prefixed_env("TELEMETRY_", {"TELEMETRY_UPTRACE_DSN": _UPTRACE})
+    assert isinstance(p, UptraceProvider)
+    assert p.dsn == _UPTRACE
+
+
+def test_prefixed_posthog() -> None:
+    p = provider_from_prefixed_env("PINCER_TELEMETRY_", {"PINCER_TELEMETRY_POSTHOG_DSN": _POSTHOG})
+    assert isinstance(p, PostHogProvider)
+    assert p.api_key == "phc_secret"
+    assert p.host == "https://eu.i.posthog.com"
+
+
+def test_prefixed_defaults_to_os_environ(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TELEMETRY_UPTRACE_DSN", _UPTRACE)
+    assert isinstance(provider_from_prefixed_env(), UptraceProvider)
+
+
+def test_prefixed_both_providers_raise() -> None:
+    env = {"TELEMETRY_UPTRACE_DSN": _UPTRACE, "TELEMETRY_POSTHOG_DSN": _POSTHOG}
+    with pytest.raises(TelemetryConfigError) as exc:
+        provider_from_prefixed_env("TELEMETRY_", env)
+    msg = str(exc.value)
+    assert "TELEMETRY_UPTRACE_DSN" in msg
+    assert "TELEMETRY_POSTHOG_DSN" in msg
+    assert "tok" not in msg
+    assert "phc_secret" not in msg
+
+
+@pytest.mark.parametrize("key", ["TELEMETRY_PROVIDER", "TELEMETRY_DSN", "TELEMETRY_UPTRACE", "TELEMETRY_DATADOG_DSN"])
+def test_prefixed_unknown_key_raises(key: str) -> None:
+    with pytest.raises(TelemetryConfigError, match=key) as exc:
+        provider_from_prefixed_env("TELEMETRY_", {key: "secret-value"})
+    assert "secret-value" not in str(exc.value)
+
+
+def test_prefixed_is_a_value_error() -> None:
+    assert issubclass(TelemetryConfigError, ValueError)
+
+
+@pytest.mark.parametrize(
+    "dsn",
+    ["https://us.i.posthog.com", "ftp://phc_secret@h", "https://phc_secret@h/path", "https://phc_secret@h?x=1"],
+)
+def test_prefixed_malformed_posthog_dsn_raises(dsn: str) -> None:
+    with pytest.raises(TelemetryConfigError, match="TELEMETRY_POSTHOG_DSN") as exc:
+        provider_from_prefixed_env("TELEMETRY_", {"TELEMETRY_POSTHOG_DSN": dsn})
+    assert "phc_secret" not in str(exc.value)
+
+
+@pytest.mark.parametrize(
+    "dsn",
+    ["https://api.uptrace.dev", "api.uptrace.dev", "grpc://s3cr3t@h", "https://s3cr3t@:4317", "https://s3cr3t@h:x"],
+)
+def test_prefixed_malformed_uptrace_dsn_raises(dsn: str) -> None:
+    with pytest.raises(TelemetryConfigError, match="TELEMETRY_UPTRACE_DSN") as exc:
+        provider_from_prefixed_env("TELEMETRY_", {"TELEMETRY_UPTRACE_DSN": dsn})
+    assert "s3cr3t" not in str(exc.value)

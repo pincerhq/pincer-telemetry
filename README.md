@@ -181,6 +181,15 @@ UptraceProvider("http://<token>@collector.internal:4318")  # self-hosted, plain 
   - In sync mode, PostHog's `enable_exception_autocapture` also catches uncaught exceptions through `sys.excepthook` and `threading.excepthook`. `AsyncPosthog` has no autocapture.
 - **Shutdown:** `shutdown()` flushes and closes the client and removes the handler.
 
+`PostHogProvider.from_dsn(dsn, **kwargs)` builds a provider from a single DSN, `scheme://<api_key>@host[:port]`:
+
+```python
+PostHogProvider.from_dsn("https://phc_xxx@us.i.posthog.com")  # US cloud
+PostHogProvider.from_dsn("https://phc_xxx@eu.i.posthog.com")  # EU cloud
+```
+
+The userinfo becomes `api_key` and `scheme://host[:port]` becomes `host`. A missing scheme, host or key, or a URL with a path or query, raises `TelemetryConfigError`.
+
 PostHog's LLM-analytics OTel exporter (`posthog[otel]`, `/i/v0/ai/otel`) isn't supported yet; it may be added later.
 
 ## Configuring from the environment
@@ -200,6 +209,33 @@ When `TELEMETRY_PROVIDER` is unset, Uptrace is chosen if a DSN is set; otherwise
 from pincer_telemetry import init, provider_from_env
 
 if (provider := provider_from_env()) is not None:
+    init(provider, service_name="svc", version="1.0.0")
+```
+
+## Prefixed configuration
+
+`provider_from_prefixed_env(prefix="TELEMETRY_", env=None)` is the strict scheme: one DSN per provider, named `<prefix><PROVIDER>_DSN`, with the provider detected from the name.
+
+| Variable (default prefix) | DSN format |
+|---|---|
+| `TELEMETRY_UPTRACE_DSN` | `https://<token>@api.uptrace.dev?grpc=4317` |
+| `TELEMETRY_POSTHOG_DSN` | `https://<phc_api_key>@us.i.posthog.com` (or `eu.i.posthog.com`) |
+
+Rules, applied to the keys in `env` (default `os.environ`) that start with `prefix`:
+
+- Empty values count as unset, so docker-compose `${VAR}` mappings for unset variables are harmless.
+- No keys set → returns `None` (telemetry off).
+- Any other `<prefix>*` key, e.g. `TELEMETRY_PROVIDER` or a typo, raises `TelemetryConfigError`.
+- DSNs for both providers raise `TelemetryConfigError`.
+- A malformed DSN (missing scheme, host or token/key) raises `TelemetryConfigError`.
+
+`TelemetryConfigError` subclasses `ValueError`. Its messages name keys, never values, because DSNs carry secrets.
+
+```python
+from pincer_telemetry import init, provider_from_prefixed_env
+
+# Raises TelemetryConfigError on misconfiguration; let it stop the process.
+if (provider := provider_from_prefixed_env("MYAPP_TELEMETRY_")) is not None:
     init(provider, service_name="svc", version="1.0.0")
 ```
 
