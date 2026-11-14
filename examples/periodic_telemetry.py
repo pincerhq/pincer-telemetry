@@ -6,11 +6,17 @@ Demonstrates all three OTel signal types being emitted on a fixed interval:
   - a counter and gauge updated every tick
   - structured log records at each stage
 
-Usage:
-    DSN_URL=https://<token>@otlp.uptrace.dev python examples/periodic_telemetry.py
+The backend is chosen by ``provider_from_env()``.
 
-Optional env vars:
-    DSN_URL       OTLP endpoint with embedded token (required)
+Usage:
+    UPTRACE_DSN=https://<token>@api.uptrace.dev?grpc=4317 python examples/periodic_telemetry.py
+    TELEMETRY_PROVIDER=posthog POSTHOG_API_KEY=phc_... python examples/periodic_telemetry.py
+
+Env vars:
+    TELEMETRY_PROVIDER  uptrace | posthog (optional; inferred from the credentials below)
+    UPTRACE_DSN         Uptrace DSN (OTEL_DSN is accepted too)
+    POSTHOG_API_KEY     PostHog project token
+    POSTHOG_HOST        PostHog host (default: https://us.i.posthog.com)
     SERVICE_NAME  service.name resource attribute (default: periodic-example)
     VERSION       service.version resource attribute (default: 0.1.0)
     INTERVAL      seconds between ticks (default: 5)
@@ -33,18 +39,18 @@ def _env(key: str, default: str) -> str:
 
 
 def main() -> None:
-    dsn_url = os.environ.get("DSN_URL")
-    if not dsn_url:
-        raise SystemExit("DSN_URL environment variable is required")
+    from pincer_telemetry import init, provider_from_env
+
+    provider = provider_from_env()
+    if provider is None:
+        raise SystemExit("set UPTRACE_DSN or POSTHOG_API_KEY (see the module docstring)")
 
     service_name = _env("SERVICE_NAME", "periodic-example")
     version = _env("VERSION", "0.1.0")
     interval = float(_env("INTERVAL", "5"))
     max_ticks = int(_env("TICKS", "0"))
 
-    from pincer_telemetry import init
-
-    shutdown = init(project_name=service_name, version=version, dsn_url=dsn_url)
+    tel = init(provider, service_name=service_name, version=version)
 
     # OTel providers are now set globally — obtain tracer and meter from them.
     from opentelemetry import metrics, trace
@@ -108,7 +114,7 @@ def main() -> None:
             time.sleep(remaining)
 
     logger.info("loop finished after %d tick(s), flushing exporters", tick)
-    shutdown()
+    tel.shutdown()
 
 
 if __name__ == "__main__":

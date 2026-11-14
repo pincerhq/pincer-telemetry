@@ -1,26 +1,42 @@
 """
-OpenTelemetry traces, metrics, and logs — shareable across Pincer workspace apps.
+Pluggable telemetry: OpenTelemetry traces, metrics and logs for Uptrace or PostHog.
 
-Requires the ``telemetry`` optional extra or direct installation::
+Sync::
 
-    pip install pincer-telemetry
+    from pincer_telemetry import UptraceProvider, init
 
-Quick start::
+    tel = init(UptraceProvider(dsn="https://<token>@api.uptrace.dev?grpc=4317"), service_name="svc", version="1.0.0")
 
-    from pincer_telemetry import init
+Async (e.g. a FastAPI lifespan)::
 
-    shutdown = init(
-        project_name="my-agent",
-        version="1.0.0",
-        dsn_url="https://<token>@otlp.uptrace.dev",
-    )
+    from pincer_telemetry import PostHogProvider, init_async
 
-All three OTel signal types (traces, metrics, logs) are configured in a single
-call.  The stdlib ``logging`` root logger is bridged into OTel logs so existing
-``logging.getLogger(__name__)`` calls appear in your telemetry backend without
-any code changes.
+    tel = await init_async(PostHogProvider(api_key="phc_..."), service_name="svc", version="1.0.0")
+    ...
+    await tel.shutdown()
+
+Anywhere else in the app, use the OTel globals (``trace.get_tracer``,
+``metrics.get_meter``, ``logging.getLogger``) and :func:`get_provider` for
+vendor-specific features.
 """
 
-from pincer_telemetry._core import init
+from pincer_telemetry._api import AsyncTelemetry, Telemetry, get_provider, init, init_async
+from pincer_telemetry._env import provider_from_env
+from pincer_telemetry._types import DEFAULT_COLLECTORS, Collector, OtelTuning, SignalExporters
+from pincer_telemetry.providers import PostHogProvider, Provider, UptraceProvider
 
-__all__ = ["init"]
+__all__ = [
+    "DEFAULT_COLLECTORS",
+    "AsyncTelemetry",
+    "Collector",
+    "OtelTuning",
+    "PostHogProvider",
+    "Provider",
+    "SignalExporters",
+    "Telemetry",
+    "UptraceProvider",
+    "get_provider",
+    "init",
+    "init_async",
+    "provider_from_env",
+]

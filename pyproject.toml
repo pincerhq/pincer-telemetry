@@ -4,14 +4,15 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pincer-telemetry"
-version = "0.1.0"
-description = "OpenTelemetry initialisation — gRPC-first OTLP exporter for Pincer and other apps"
+version = "0.2.0"
+description = "Pluggable telemetry (OTel traces/metrics/logs) for Uptrace and PostHog"
 requires-python = ">=3.12"
 dependencies = [
-    "opentelemetry-sdk>=1.25.0",
-    "opentelemetry-exporter-otlp-proto-grpc>=1.25.0",
-    "opentelemetry-exporter-otlp-proto-http>=1.25.0",
-    "opentelemetry-instrumentation-logging>=0.46b0",
+    "opentelemetry-sdk>=1.40.0",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.40.0",
+    "opentelemetry-exporter-otlp-proto-http>=1.40.0",
+    "opentelemetry-instrumentation-logging>=0.61b0",
+    "posthog[async]>=7.45.0,<8",
 ]
 
 [project.optional-dependencies]
@@ -32,6 +33,7 @@ packages = ["src/pincer_telemetry"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
 pythonpath = ["src"]
 
