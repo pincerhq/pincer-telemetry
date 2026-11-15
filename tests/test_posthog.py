@@ -17,6 +17,8 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 _HTTP_PKG = "opentelemetry.exporter.otlp.proto.http"
+_US = "https://phc_x@us.i.posthog.com"
+_EU = "https://phc_x@eu.i.posthog.com"
 
 
 @pytest.fixture
@@ -43,19 +45,19 @@ def _handlers() -> list[logging.Handler]:
 
 
 @pytest.mark.parametrize(
-    ("host", "base"),
+    ("dsn", "base"),
     [
-        ("https://us.i.posthog.com", "https://us.i.posthog.com"),
-        ("https://eu.i.posthog.com/", "https://eu.i.posthog.com"),
+        ("https://phc_test@us.i.posthog.com", "https://us.i.posthog.com"),
+        ("https://phc_test@eu.i.posthog.com/", "https://eu.i.posthog.com"),
     ],
 )
-def test_exporter_endpoints_and_bearer_header(host: str, base: str) -> None:
+def test_exporter_endpoints_and_bearer_header(dsn: str, base: str) -> None:
     with (
         patch(f"{_HTTP_PKG}.trace_exporter.OTLPSpanExporter") as span,
         patch(f"{_HTTP_PKG}.metric_exporter.OTLPMetricExporter") as metric,
         patch(f"{_HTTP_PKG}._log_exporter.OTLPLogExporter") as log,
     ):
-        PostHogProvider("phc_test", host=host).exporters(DEFAULT_COLLECTORS)
+        PostHogProvider(dsn).exporters(DEFAULT_COLLECTORS)
 
     for mock, signal in ((span, "traces"), (metric, "metrics"), (log, "logs")):
         mock.assert_called_once_with(
@@ -65,14 +67,8 @@ def test_exporter_endpoints_and_bearer_header(host: str, base: str) -> None:
         )
 
 
-def test_default_host_is_us() -> None:
-    with patch(f"{_HTTP_PKG}._log_exporter.OTLPLogExporter") as log:
-        PostHogProvider("phc_x").exporters(frozenset({Collector.LOGS}))
-    assert log.call_args.kwargs["endpoint"] == "https://us.i.posthog.com/i/v1/logs"
-
-
 def test_only_requested_exporters_built() -> None:
-    result = PostHogProvider("phc_x").exporters(frozenset({Collector.TRACES}))
+    result = PostHogProvider(_US).exporters(frozenset({Collector.TRACES}))
     assert result.span is not None
     assert result.metric is None
     assert result.log is None
@@ -80,19 +76,19 @@ def test_only_requested_exporters_built() -> None:
 
 
 def test_tuning_uses_sdk_defaults() -> None:
-    t = PostHogProvider("phc_x").tuning()
+    t = PostHogProvider(_US).tuning()
     assert t.max_queue_size is None
     assert t.max_export_batch_size is None
     assert t.export_interval_millis is None
 
 
-def test_empty_api_key_rejected() -> None:
-    with pytest.raises(ValueError):
+def test_empty_dsn_rejected() -> None:
+    with pytest.raises(ValueError):  # TelemetryConfigError is a ValueError
         PostHogProvider("")
 
 
 def test_repr_hides_api_key() -> None:
-    assert "phc_secret" not in repr(PostHogProvider("phc_secret"))
+    assert "phc_secret" not in repr(PostHogProvider("https://phc_secret@us.i.posthog.com"))
 
 
 # ---------------------------------------------------------------------------
@@ -102,11 +98,11 @@ def test_repr_hides_api_key() -> None:
 
 def test_client_before_start_raises() -> None:
     with pytest.raises(RuntimeError, match="not started"):
-        _ = PostHogProvider("phc_x").client
+        _ = PostHogProvider(_US).client
 
 
 def test_start_sync_builds_posthog_with_autocapture(sync_client_cls: MagicMock) -> None:
-    p = PostHogProvider("phc_x", host="https://eu.i.posthog.com", client_options={"debug": True})
+    p = PostHogProvider(_EU, client_options={"debug": True})
     p.start_sync()
 
     sync_client_cls.assert_called_once_with(
@@ -119,7 +115,7 @@ def test_start_sync_builds_posthog_with_autocapture(sync_client_cls: MagicMock) 
 
 
 def test_start_sync_without_exception_capture(sync_client_cls: MagicMock) -> None:
-    p = PostHogProvider("phc_x", capture_exceptions=False)
+    p = PostHogProvider(_US, capture_exceptions=False)
     p.start_sync()
     assert sync_client_cls.call_args.kwargs["enable_exception_autocapture"] is False
     assert _handlers() == []
@@ -127,7 +123,7 @@ def test_start_sync_without_exception_capture(sync_client_cls: MagicMock) -> Non
 
 
 def test_stop_sync_shuts_down_and_removes_handler(sync_client_cls: MagicMock) -> None:
-    p = PostHogProvider("phc_x")
+    p = PostHogProvider(_US)
     p.start_sync()
     p.flush_sync()
     sync_client_cls.return_value.flush.assert_called_once_with()
@@ -142,7 +138,7 @@ def test_stop_sync_shuts_down_and_removes_handler(sync_client_cls: MagicMock) ->
 
 
 async def test_start_async_builds_async_posthog(async_client_cls: MagicMock) -> None:
-    p = PostHogProvider("phc_x", host="https://eu.i.posthog.com")
+    p = PostHogProvider(_EU)
     await p.start_async()
 
     async_client_cls.assert_called_once_with("phc_x", host="https://eu.i.posthog.com")
@@ -159,7 +155,7 @@ async def test_start_async_builds_async_posthog(async_client_cls: MagicMock) -> 
 
 
 def test_flush_and_stop_before_start_are_noops() -> None:
-    p = PostHogProvider("phc_x")
+    p = PostHogProvider(_US)
     p.flush_sync()
     p.stop_sync()
     assert not p.started
@@ -215,7 +211,7 @@ def test_handler_swallows_client_errors(capsys: pytest.CaptureFixture[str]) -> N
 
 
 # ---------------------------------------------------------------------------
-# from_dsn
+# DSN parsing
 # ---------------------------------------------------------------------------
 
 
@@ -228,15 +224,15 @@ def test_handler_swallows_client_errors(capsys: pytest.CaptureFixture[str]) -> N
         ("http://phc_key@[::1]:8000", "http://[::1]:8000"),
     ],
 )
-def test_from_dsn(dsn: str, host: str) -> None:
-    p = PostHogProvider.from_dsn(dsn)
+def test_dsn_parsed(dsn: str, host: str) -> None:
+    p = PostHogProvider(dsn)
     assert p.api_key == "phc_key"
     assert p.host == host
+    assert p.dsn == dsn
 
 
-def test_from_dsn_passes_kwargs() -> None:
-    p = PostHogProvider.from_dsn("https://phc_key@us.i.posthog.com", capture_exceptions=False)
-    assert p.capture_exceptions is False
+def test_dsn_key_is_percent_decoded() -> None:
+    assert PostHogProvider("https://phc%2Bkey@us.i.posthog.com").api_key == "phc+key"
 
 
 @pytest.mark.parametrize(
@@ -252,7 +248,7 @@ def test_from_dsn_passes_kwargs() -> None:
         ("https://phc_key@us.i.posthog.com:notaport", "valid URL"),
     ],
 )
-def test_from_dsn_malformed(dsn: str, match: str) -> None:
+def test_dsn_malformed(dsn: str, match: str) -> None:
     with pytest.raises(TelemetryConfigError, match=match) as exc:
-        PostHogProvider.from_dsn(dsn)
+        PostHogProvider(dsn)
     assert "phc_key" not in str(exc.value)

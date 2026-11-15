@@ -65,7 +65,7 @@ from pincer_telemetry import PostHogProvider, init_async
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     tel = await init_async(
-        PostHogProvider(api_key="phc_...", host="https://eu.i.posthog.com"),
+        PostHogProvider("https://phc_...@eu.i.posthog.com"),
         service_name="api",
         version="1.0.0",
     )
@@ -172,23 +172,25 @@ UptraceProvider("https://<token>@api.uptrace.dev")  # Uptrace cloud, HTTP
 UptraceProvider("http://<token>@collector.internal:4318")  # self-hosted, plain HTTP
 ```
 
-### `PostHogProvider(api_key, *, host="https://us.i.posthog.com", capture_exceptions=True, client_options=None)`
+### `PostHogProvider(dsn, *, capture_exceptions=True, client_options=None)`
 
-- **OTel export:** OTLP/HTTP with gzip to `{host}/i/v1/{traces,metrics,logs}`, with header `Authorization: Bearer <api_key>`. Use `https://eu.i.posthog.com` for the EU region. Metric temporality stays at the SDK default (cumulative).
+`dsn` is `scheme://<api_key>@host[:port]`, like the Uptrace DSN:
+
+```python
+PostHogProvider("https://phc_xxx@us.i.posthog.com")  # US cloud
+PostHogProvider("https://phc_xxx@eu.i.posthog.com")  # EU cloud
+PostHogProvider("http://phc_xxx@posthog.internal:8000")  # self-hosted
+```
+
+The userinfo is the project token (`api_key`, percent-decoded) and `scheme://host[:port]` is the ingest `host`. A missing scheme, host or key, a password, or a path, query or fragment raises `TelemetryConfigError` (a `ValueError`); the message never includes the DSN.
+
+
+- **OTel export:** OTLP/HTTP with gzip to `{host}/i/v1/{traces,metrics,logs}`, with header `Authorization: Bearer <api_key>`. Use an `eu.i.posthog.com` DSN for the EU region. Metric temporality stays at the SDK default (cumulative).
 - **Client:** `provider.client` is a `posthog.Posthog` after `init()`, or a `posthog.AsyncPosthog` after `init_async()`. Reading it before start raises `RuntimeError`. `client_options` is passed through to the client constructor.
 - **Error tracking** (`capture_exceptions=True`):
   - In both modes, a root-logger handler forwards `ERROR`+ records that carry `exc_info`, such as `logger.exception(...)`, to `client.capture_exception`.
   - In sync mode, PostHog's `enable_exception_autocapture` also catches uncaught exceptions through `sys.excepthook` and `threading.excepthook`. `AsyncPosthog` has no autocapture.
 - **Shutdown:** `shutdown()` flushes and closes the client and removes the handler.
-
-`PostHogProvider.from_dsn(dsn, **kwargs)` builds a provider from a single DSN, `scheme://<api_key>@host[:port]`:
-
-```python
-PostHogProvider.from_dsn("https://phc_xxx@us.i.posthog.com")  # US cloud
-PostHogProvider.from_dsn("https://phc_xxx@eu.i.posthog.com")  # EU cloud
-```
-
-The userinfo becomes `api_key` and `scheme://host[:port]` becomes `host`. A missing scheme, host or key, or a URL with a path or query, raises `TelemetryConfigError`.
 
 PostHog's LLM-analytics OTel exporter (`posthog[otel]`, `/i/v0/ai/otel`) isn't supported yet; it may be added later.
 
@@ -201,7 +203,7 @@ PostHog's LLM-analytics OTel exporter (`posthog[otel]`, `/i/v0/ai/otel`) isn't s
 | `TELEMETRY_PROVIDER` | `uptrace` or `posthog`. Optional; when set, the matching credentials are required (`ValueError` otherwise) |
 | `UPTRACE_DSN` | Uptrace DSN (`OTEL_DSN` is accepted as a legacy alias) |
 | `POSTHOG_API_KEY` | PostHog project token (`phc_...`) |
-| `POSTHOG_HOST` | PostHog host (default `https://us.i.posthog.com`) |
+| `POSTHOG_HOST` | PostHog host, `scheme://host[:port]` (default `https://us.i.posthog.com`); combined with the key into the DSN |
 
 When `TELEMETRY_PROVIDER` is unset, Uptrace is chosen if a DSN is set; otherwise PostHog is chosen if `POSTHOG_API_KEY` is set.
 

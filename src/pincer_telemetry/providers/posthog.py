@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, Self, cast
+from typing import TYPE_CHECKING, Any, cast
 from urllib.parse import unquote, urlsplit
 
 from pincer_telemetry._errors import TelemetryConfigError
@@ -11,8 +11,6 @@ from pincer_telemetry._types import Collector, OtelTuning, SignalExporters
 
 if TYPE_CHECKING:
     from posthog import AsyncPosthog, Posthog
-
-DEFAULT_HOST = "https://us.i.posthog.com"
 
 
 class _PostHogExceptionHandler(logging.Handler):
@@ -38,77 +36,77 @@ class _PostHogExceptionHandler(logging.Handler):
             self.handleError(record)
 
 
+def _parse_dsn(dsn: str) -> tuple[str, str]:
+    """
+    Split a PostHog DSN, ``scheme://<api_key>@host[:port]``, into ``(api_key, host)``.
+
+    ``host`` is ``scheme://host[:port]``, without the key.
+
+    Raises
+    ------
+    TelemetryConfigError
+        When the scheme, host or key is missing, or the URL has a password, path, query
+        or fragment. The message never includes the DSN, which carries the key.
+    """
+    try:
+        parts = urlsplit(dsn.strip())
+        port = parts.port
+    except ValueError:
+        raise TelemetryConfigError("PostHog DSN is not a valid URL") from None
+    if parts.scheme not in ("http", "https"):
+        raise TelemetryConfigError("PostHog DSN must use the http or https scheme")
+    if not parts.hostname:
+        raise TelemetryConfigError("PostHog DSN has no host")
+    if not parts.username:
+        raise TelemetryConfigError("PostHog DSN has no API key; expected scheme://<api_key>@host")
+    if parts.password is not None:
+        raise TelemetryConfigError("PostHog DSN must not contain a password; expected scheme://<api_key>@host")
+    if parts.path not in ("", "/") or parts.query or parts.fragment:
+        raise TelemetryConfigError("PostHog DSN must not have a path, query or fragment")
+    hostname = f"[{parts.hostname}]" if ":" in parts.hostname else parts.hostname  # IPv6 literal
+    netloc = hostname if port is None else f"{hostname}:{port}"
+    return unquote(parts.username), f"{parts.scheme}://{netloc}"
+
+
 class PostHogProvider:
     """
     Export OTel traces, metrics and logs to PostHog and expose the PostHog client.
 
     Parameters
     ----------
-    api_key:
-        PostHog project token (``phc_...``).
-    host:
-        PostHog ingest host, e.g. ``https://us.i.posthog.com`` or ``https://eu.i.posthog.com``.
+    dsn:
+        PostHog DSN, ``scheme://<api_key>@host[:port]``, e.g.
+        ``https://phc_xxx@us.i.posthog.com`` or ``https://phc_xxx@eu.i.posthog.com``.
+        The userinfo is the project token (``api_key``); ``scheme://host[:port]`` is
+        the ingest ``host``.
     capture_exceptions:
         Send exceptions to PostHog error tracking: ``logger.exception()`` records
         (both modes) and uncaught exceptions via autocapture (sync mode only).
     client_options:
         Extra keyword arguments for ``Posthog``/``AsyncPosthog``.
+
+    Raises
+    ------
+    TelemetryConfigError
+        When the DSN is malformed (see :func:`_parse_dsn`). The message never includes the DSN.
     """
 
     name = "posthog"
 
     def __init__(
         self,
-        api_key: str,
+        dsn: str,
         *,
-        host: str = DEFAULT_HOST,
         capture_exceptions: bool = True,
         client_options: dict[str, Any] | None = None,
     ) -> None:
-        if not api_key:
-            raise ValueError("PostHogProvider requires a non-empty api_key")
-        self.api_key = api_key
-        self.host = host.rstrip("/")
+        self.api_key, self.host = _parse_dsn(dsn)
+        self.dsn = dsn
         self.capture_exceptions = capture_exceptions
         self.client_options: dict[str, Any] = dict(client_options or {})
         self.started = False
         self._client: Posthog | AsyncPosthog | None = None
         self._handler: _PostHogExceptionHandler | None = None
-
-    @classmethod
-    def from_dsn(cls, dsn: str, **kwargs: Any) -> Self:
-        """
-        Build a provider from a DSN of the form ``scheme://<api_key>@host[:port]``.
-
-        For example ``https://phc_xxx@us.i.posthog.com`` or ``https://phc_xxx@eu.i.posthog.com``.
-        The URL userinfo becomes ``api_key`` and ``scheme://host[:port]`` becomes ``host``.
-        Remaining keyword arguments go to the constructor.
-
-        Raises
-        ------
-        TelemetryConfigError
-            When the scheme, host or key is missing, or the URL has a path, query or fragment.
-            The message never includes the DSN, which carries the key.
-        """
-        try:
-            parts = urlsplit(dsn.strip())
-            port = parts.port
-        except ValueError:
-            raise TelemetryConfigError("PostHog DSN is not a valid URL") from None
-        if parts.scheme not in ("http", "https"):
-            raise TelemetryConfigError("PostHog DSN must use the http or https scheme")
-        if not parts.hostname:
-            raise TelemetryConfigError("PostHog DSN has no host")
-        if not parts.username:
-            raise TelemetryConfigError("PostHog DSN has no API key; expected scheme://<api_key>@host")
-        if parts.password is not None:
-            raise TelemetryConfigError("PostHog DSN must not contain a password; expected scheme://<api_key>@host")
-        if parts.path not in ("", "/") or parts.query or parts.fragment:
-            raise TelemetryConfigError("PostHog DSN must not have a path, query or fragment")
-        netloc = parts.hostname if port is None else f"{parts.hostname}:{port}"
-        if ":" in parts.hostname:  # IPv6 literal
-            netloc = f"[{parts.hostname}]" if port is None else f"[{parts.hostname}]:{port}"
-        return cls(unquote(parts.username), host=f"{parts.scheme}://{netloc}", **kwargs)
 
     def __repr__(self) -> str:
         return f"PostHogProvider(host={self.host!r}, started={self.started!r})"

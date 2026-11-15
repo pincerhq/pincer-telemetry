@@ -70,7 +70,7 @@ async def test_posthog_async_end_to_end() -> None:
         client = cls.return_value
         client.flush = AsyncMock()
         client.shutdown = AsyncMock()
-        provider = PostHogProvider("phc_x")
+        provider = PostHogProvider("https://phc_x@us.i.posthog.com")
         with (
             patch("opentelemetry.exporter.otlp.proto.http.trace_exporter.OTLPSpanExporter"),
             patch("opentelemetry.exporter.otlp.proto.http._log_exporter.OTLPLogExporter"),

@@ -279,6 +279,12 @@ def test_env_posthog_default_host() -> None:
     assert p.host == "https://us.i.posthog.com"
 
 
+def test_env_posthog_host_without_scheme_rejected() -> None:
+    with pytest.raises(TelemetryConfigError, match="POSTHOG_HOST") as exc:
+        provider_from_env({"POSTHOG_API_KEY": "phc_secret", "POSTHOG_HOST": "eu.i.posthog.com"})
+    assert "phc_secret" not in str(exc.value)
+
+
 def test_env_explicit_posthog_overrides_dsn() -> None:
     p = provider_from_env({"TELEMETRY_PROVIDER": "PostHog", "OTEL_DSN": "https://t@h", "POSTHOG_API_KEY": "phc_x"})
     assert isinstance(p, PostHogProvider)

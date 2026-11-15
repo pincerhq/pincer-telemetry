@@ -11,7 +11,7 @@ Async (e.g. a FastAPI lifespan)::
 
     from pincer_telemetry import PostHogProvider, init_async
 
-    tel = await init_async(PostHogProvider(api_key="phc_..."), service_name="svc", version="1.0.0")
+    tel = await init_async(PostHogProvider(dsn="https://phc_...@us.i.posthog.com"), service_name="svc", version="1.0.0")
     ...
     await tel.shutdown()
 

@@ -4,16 +4,26 @@ from __future__ import annotations
 
 import os
 from typing import TYPE_CHECKING
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from pincer_telemetry._errors import TelemetryConfigError
-from pincer_telemetry.providers.posthog import DEFAULT_HOST, PostHogProvider
+from pincer_telemetry.providers.posthog import PostHogProvider
 from pincer_telemetry.providers.uptrace import UptraceProvider
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
     from pincer_telemetry.providers.base import Provider
+
+_POSTHOG_DEFAULT_HOST = "https://us.i.posthog.com"
+
+
+def _posthog_from_api_key(api_key: str, host: str) -> PostHogProvider:
+    """Build a PostHog provider from the legacy key + host pair by composing its DSN."""
+    scheme, sep, netloc = host.strip().rstrip("/").partition("://")
+    if not sep:
+        raise TelemetryConfigError("POSTHOG_HOST must be scheme://host[:port], e.g. https://eu.i.posthog.com")
+    return PostHogProvider(f"{scheme}://{quote(api_key.strip(), safe='')}@{netloc}")
 
 
 def provider_from_env(env: Mapping[str, str] | None = None) -> Provider | None:
@@ -32,7 +42,7 @@ def provider_from_env(env: Mapping[str, str] | None = None) -> Provider | None:
     kind = env.get("TELEMETRY_PROVIDER", "").strip().lower()
     dsn = env.get("UPTRACE_DSN") or env.get("OTEL_DSN")
     api_key = env.get("POSTHOG_API_KEY")
-    host = env.get("POSTHOG_HOST") or DEFAULT_HOST
+    host = env.get("POSTHOG_HOST") or _POSTHOG_DEFAULT_HOST
 
     if kind == "uptrace":
         if not dsn:
@@ -41,13 +51,13 @@ def provider_from_env(env: Mapping[str, str] | None = None) -> Provider | None:
     if kind == "posthog":
         if not api_key:
             raise ValueError("TELEMETRY_PROVIDER=posthog requires POSTHOG_API_KEY")
-        return PostHogProvider(api_key, host=host)
+        return _posthog_from_api_key(api_key, host)
     if kind:
         raise ValueError(f"unknown TELEMETRY_PROVIDER {kind!r}; expected 'uptrace' or 'posthog'")
     if dsn:
         return UptraceProvider(dsn)
     if api_key:
-        return PostHogProvider(api_key, host=host)
+        return _posthog_from_api_key(api_key, host)
     return None
 
 
@@ -111,6 +121,6 @@ def provider_from_prefixed_env(prefix: str = "TELEMETRY_", env: Mapping[str, str
     if provider == "UPTRACE":
         return _uptrace_from_dsn(key, dsn)
     try:
-        return PostHogProvider.from_dsn(dsn)
+        return PostHogProvider(dsn)
     except TelemetryConfigError as exc:
         raise TelemetryConfigError(f"{key}: {exc}") from None
